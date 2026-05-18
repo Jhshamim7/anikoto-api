@@ -20,7 +20,7 @@
       />
     </p>
 
-# <p align="center">Anime API</p>
+# <p align="center">Anikoto API</p>
 
 >
 
