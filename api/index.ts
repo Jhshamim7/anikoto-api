@@ -187,8 +187,9 @@ app.get("/api/genre/:category", async (req, res) => {
   }
 });
 
-app.get("/api/info/:animeId", async (req, res) => {
-  const { animeId } = req.params;
+app.get("/api/info", async (req, res) => {
+  const animeId = req.query.id as string;
+  if (!animeId) return res.status(400).json({ success: false, error: "Anime ID is required" });
   try {
     const { data } = await client.get(`/watch/${animeId}`);
     const $ = cheerio.load(data);
@@ -441,7 +442,7 @@ app.get("/api/stream", async (req, res) => {
       success: true,
       data: {
            m3u8: isM3U8 ? finalUrl : null,
-           iframe: url,
+           referer: url ? new URL(url).origin + "/" : null,
            intro,
            outro,
            subtitles
