@@ -1,0 +1,6 @@
+{
+  "name": "Anime API & Explorer",
+  "description": "A RESTful API for anime information and a frontend to explore and test the endpoints.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
