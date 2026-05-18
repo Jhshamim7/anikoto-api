@@ -107,7 +107,7 @@ async function getEpisodesData(animeId: string) {
 
 // API routes
 app.get("/api/search", async (req, res) => {
-  const q = req.query.keyword as string;
+  const keyword = req.query.keyword as string;
   if (!keyword) return res.status(400).json({ error: "Keyword required" });
   try {
     const resp = await client.get("/filter", { params: { keyword } });
@@ -187,8 +187,8 @@ app.get("/api/genre/:category", async (req, res) => {
   }
 });
 
-app.get("/api/info?id:animeId", async (req, res) => {
-  const { id:animeId } = req.params;
+app.get("/api/info/:animeId", async (req, res) => {
+  const { animeId } = req.params;
   try {
     const { data } = await client.get(`/watch/${animeId}`);
     const $ = cheerio.load(data);
