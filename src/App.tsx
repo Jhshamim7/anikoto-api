@@ -77,7 +77,7 @@ export default function App() {
             <label className="text-xs uppercase tracking-widest opacity-60">Anime Info & Episodes</label>
             <input className="w-full p-2 border border-[#141414] mb-2" value={animeId} onChange={e => setAnimeId(e.target.value)} placeholder="id (e.g. naruto-eybxz)" />
             <div className="grid grid-cols-2 gap-2">
-              <button className="w-full bg-[#141414] text-[#E4E3E0] p-2 hover:bg-gray-800 text-sm" onClick={() => fetchEndpoint(`/api/info/${animeId}`)}>Get Info</button>
+              <button className="w-full bg-[#141414] text-[#E4E3E0] p-2 hover:bg-gray-800 text-sm" onClick={() => fetchEndpoint(`/api/info?id=${animeId}`)}>Get Info</button>
               <button className="w-full bg-[#141414] text-[#E4E3E0] p-2 hover:bg-gray-800 text-sm" onClick={() => fetchEndpoint(`/api/episodes/${animeId}`)}>Get Episodes</button>
             </div>
           </div>
