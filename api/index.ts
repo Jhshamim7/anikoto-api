@@ -86,6 +86,9 @@ async function getEpisodesData(animeId: string) {
       ids: $ep(el).attr("data-ids"),
       slug: $ep(el).attr("data-slug"),
       malId: parseInt($ep(el).attr("data-mal") || "0", 10) || null,
+      isSub: $ep(el).attr("data-sub") === "1",
+      isDub: $ep(el).attr("data-dub") === "1",
+      isFiller: !!$ep(el).attr("class")?.includes("filler") || !!$ep(el).parent().attr("class")?.includes("filler"),
     });
   });
   
@@ -94,10 +97,13 @@ async function getEpisodesData(animeId: string) {
     $ep("a[data-ids][data-num]").each((_, el) => {
       episodes.push({
         num: parseInt($ep(el).attr("data-num") || "0", 10),
-        title: $ep(el).find(".ep-name, .d-title").text().trim() || `Episode ${$ep(el).attr("data-num")}`,
+        title: $ep(el).find(".ep-name, .d-title").text().trim() || $ep(el).parent().attr("title") || `Episode ${$ep(el).attr("data-num")}`,
         ids: $ep(el).attr("data-ids"),
         slug: $ep(el).attr("data-slug"),
         malId: parseInt($ep(el).attr("data-mal") || "0", 10) || null,
+        isSub: $ep(el).attr("data-sub") === "1",
+        isDub: $ep(el).attr("data-dub") === "1",
+        isFiller: !!$ep(el).attr("class")?.includes("filler") || !!$ep(el).parent().attr("class")?.includes("filler"),
       });
     });
   }
@@ -216,6 +222,8 @@ app.get("/api/info", async (req, res) => {
 
     let malId: number | null = null;
     let anilistId: number | null = null;
+    let totalSub = 0;
+    let totalDub = 0;
     
     try {
       const { episodes } = await getEpisodesData(animeId);
@@ -223,6 +231,8 @@ app.get("/api/info", async (req, res) => {
           const firstEp = episodes[0];
           if (firstEp.malId) malId = firstEp.malId;
       }
+      totalSub = episodes.filter(e => e.isSub).length;
+      totalDub = episodes.filter(e => e.isDub).length;
     } catch (epErr) {
       console.error("Could not fetch episodes for info:", epErr);
     }
@@ -273,6 +283,8 @@ app.get("/api/info", async (req, res) => {
           description,
           malId,
           anilistId,
+          totalSub,
+          totalDub,
           related,
           recommendations: recommended,
           ...info
@@ -291,7 +303,10 @@ app.get("/api/episodes/:animeId", async (req, res) => {
     const formattedEpisodes = episodes.map(e => ({
         num: e.num,
         title: e.title,
-        slug: e.slug
+        slug: e.slug,
+        isSub: e.isSub,
+        isDub: e.isDub,
+        isFiller: e.isFiller
     }));
     res.json({ success: true, data: formattedEpisodes });
   } catch (e: any) {
