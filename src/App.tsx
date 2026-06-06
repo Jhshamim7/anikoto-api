@@ -89,6 +89,7 @@ export default function App() {
                 <select className="w-full p-2 border border-[#141414]" value={serverName} onChange={e => setServerName(e.target.value)}>
                     <option value="hd-1">hd-1</option>
                     <option value="hd-2">hd-2</option>
+                    <option value="hd-3">hd-3</option>
                 </select>
                 <select className="w-full p-2 border border-[#141414]" value={type} onChange={e => setType(e.target.value)}>
                     <option value="sub">sub</option>
