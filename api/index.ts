@@ -9,18 +9,18 @@ app.use(cors());
 app.use(express.json());
 
 const ajaxClient = axios.create({
-  baseURL: "https://anikototv.to",
+  baseURL: "https://anikoto.cz",
   timeout: 15000,
   headers: {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     Accept: "application/json, text/javascript, */*; q=0.01",
     "X-Requested-With": "XMLHttpRequest",
-    Referer: "https://anikototv.to",
+    Referer: "https://anikoto.cz",
   },
 });
 
 const client = axios.create({
-  baseURL: "https://anikototv.to",
+  baseURL: "https://anikoto.cz",
   timeout: 15000,
   headers: {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -68,7 +68,7 @@ async function getEpisodesData(animeId: string) {
   if (!numericId) throw new Error("Could not find numeric ID");
 
   const resp = await ajaxClient.get(`/ajax/episode/list/${numericId}`, {
-    headers: { Referer: `https://anikototv.to/watch/${animeId}` }
+    headers: { Referer: `https://anikoto.cz/watch/${animeId}` }
   });
   
   const html = resp.data.result;
@@ -109,6 +109,39 @@ async function getEpisodesData(animeId: string) {
   }
   
   return { numericId, episodes };
+}
+
+// Helper function to map server names to standardized names
+function mapServerName(name: string): string {
+  const lowerName = name.toLowerCase().trim();
+  
+  // VidCloud-1 or similar VidCloud servers map to hd-1
+  if (lowerName.includes("vidcloud")) {
+    return "hd-1";
+  }
+  
+  // Vidstream, Vidstream-2 or similar map to hd-2
+  if (lowerName.includes("vidstream")) {
+    return "hd-2";
+  }
+  
+  // HD-1 or any HD- server maps to hd-3
+  if (lowerName.includes("hd-") || lowerName.includes("hd ")) {
+    return "hd-3";
+  }
+  
+  // MegaCloud, RabbitStream etc map to hd-1 (same group as VidCloud)
+  if (lowerName.includes("megacloud") || lowerName.includes("rabbitstream")) {
+    return "hd-1";
+  }
+  
+  // MegaPlay maps to hd-2
+  if (lowerName.includes("megaplay")) {
+    return "hd-2";
+  }
+  
+  // Default fallback for unknown servers
+  return "hd-3";
 }
 
 // API routes
@@ -288,7 +321,7 @@ app.get("/api/info", async (req, res) => {
           related,
           recommendations: recommended,
           ...info
-      }
+       }
     });
   } catch (e: any) {
     console.error("Info error:", e.message);
@@ -326,7 +359,7 @@ app.get("/api/servers", async (req, res) => {
     const [animeNumId, epsNum] = episode.ids.split("&eps=");
     const resp = await ajaxClient.get(`/ajax/server/list`, {
       params: { servers: animeNumId, eps: epsNum },
-      headers: { Referer: `https://anikototv.to/watch/${animeId}` }
+      headers: { Referer: `https://anikoto.cz/watch/${animeId}` }
     });
     
     const html = resp.data.result || "";
@@ -334,10 +367,8 @@ app.get("/api/servers", async (req, res) => {
     const servers: any[] = [];
     
     $(".type li[data-link-id]").each((_, el) => {
-      let name = $(el).text().trim().toLowerCase();
-      let mappedName = name;
-      if (name.includes("vidcloud") || name.includes("megacloud") || name.includes("rabbitstream")) mappedName = "hd-1";
-      if (name.includes("vidstream") || name.includes("megaplay")) mappedName = "hd-2";
+      const name = $(el).text().trim();
+      const mappedName = mapServerName(name);
 
       servers.push({
         type: $(el).closest(".type").attr("data-type"),
@@ -365,7 +396,7 @@ app.get("/api/stream", async (req, res) => {
     const [animeNumId, epsNum] = episode.ids.split("&eps=");
     const serverResp = await ajaxClient.get(`/ajax/server/list`, {
       params: { servers: animeNumId, eps: epsNum },
-      headers: { Referer: `https://anikototv.to/watch/${animeId}` }
+      headers: { Referer: `https://anikoto.cz/watch/${animeId}` }
     });
     
     const html = serverResp.data.result || "";
@@ -375,10 +406,8 @@ app.get("/api/stream", async (req, res) => {
     
     $(".type li[data-link-id]").each((_, el) => {
       const t = $(el).closest(".type").attr("data-type");
-      let name = $(el).text().trim().toLowerCase();
-      let mappedName = name;
-      if (name.includes("vidcloud") || name.includes("megacloud") || name.includes("rabbitstream")) mappedName = "hd-1";
-      if (name.includes("vidstream") || name.includes("megaplay")) mappedName = "hd-2";
+      const name = $(el).text().trim();
+      const mappedName = mapServerName(name);
 
       if (t === type && mappedName === serverName) {
         targetLinkId = $(el).attr("data-link-id");
@@ -397,7 +426,7 @@ app.get("/api/stream", async (req, res) => {
 
     const sourceResp = await ajaxClient.get(`/ajax/server`, {
       params: { get: targetLinkId },
-      headers: { Referer: `https://anikototv.to/watch/${animeId}` }
+      headers: { Referer: `https://anikoto.cz/watch/${animeId}` }
     });
     
     const url = sourceResp.data.result?.url;
@@ -413,55 +442,55 @@ app.get("/api/stream", async (req, res) => {
     
     if (url && (url.includes('megaplay') || url.includes('vidwish') || url.includes('megacloud') || url.includes('rabbitstream') || url.includes('vidstream'))) {
        try {
-           const host = new URL(url).origin;
-           const r = await axios.get(url, {
-              headers: {
-                "Accept": "*/*",
-                "X-Requested-With": "XMLHttpRequest",
-                "Referer": "https://anikototv.to/"
-              },
-              timeout: 10000
-           });
-           const $r = cheerio.load(r.data);
-           const id = $r("#megaplay-player").attr("data-id") || $r("#megacloud-player").attr("data-id") || $r("#rabbitstream-player").attr("data-id") || $r("[data-id]").first().attr("data-id");
-           
-           if (id) {
-               const sourceUrl = `${host}/stream/getSources?id=${encodeURIComponent(id)}`;
-               const sr = await axios.get(sourceUrl, {
-                   headers: {
-                       "Accept": "*/*",
-                       "X-Requested-With": "XMLHttpRequest",
-                       "Referer": `${host}/`
-                   },
-                   timeout: 10000
-               });
-               if (sr.data && sr.data.sources && sr.data.sources.file) {
-                   finalUrl = sr.data.sources.file;
-                   isM3U8 = true;
-                   if (sr.data.intro) intro = sr.data.intro;
-                   if (sr.data.outro) outro = sr.data.outro;
-                   if (sr.data.tracks) subtitles = sr.data.tracks;
-               } else {
-                   isM3U8 = false;
-               }
-           } else {
-               isM3U8 = false;
-           }
-       } catch(e: any) {
-           console.log("MegaPlay extraction failed, falling back to Iframe URL:", e.message);
-           isM3U8 = false;
-       }
+             const host = new URL(url).origin;
+             const r = await axios.get(url, {
+                headers: {
+                  "Accept": "*/*",
+                  "X-Requested-With": "XMLHttpRequest",
+                  "Referer": "https://anikoto.cz/"
+                },
+                timeout: 10000
+             });
+             const $r = cheerio.load(r.data);
+             const id = $r("#megaplay-player").attr("data-id") || $r("#megacloud-player").attr("data-id") || $r("#rabbitstream-player").attr("data-id") || $r("[data-id]").first().attr("data-id");
+             
+             if (id) {
+                 const sourceUrl = `${host}/stream/getSources?id=${encodeURIComponent(id)}`;
+                 const sr = await axios.get(sourceUrl, {
+                     headers: {
+                         "Accept": "*/*",
+                         "X-Requested-With": "XMLHttpRequest",
+                         "Referer": `${host}/`
+                     },
+                     timeout: 10000
+                 });
+                 if (sr.data && sr.data.sources && sr.data.sources.file) {
+                     finalUrl = sr.data.sources.file;
+                     isM3U8 = true;
+                     if (sr.data.intro) intro = sr.data.intro;
+                     if (sr.data.outro) outro = sr.data.outro;
+                     if (sr.data.tracks) subtitles = sr.data.tracks;
+                 } else {
+                     isM3U8 = false;
+                 }
+             } else {
+                 isM3U8 = false;
+             }
+         } catch(e: any) {
+             console.log("MegaPlay extraction failed, falling back to Iframe URL:", e.message);
+             isM3U8 = false;
+         }
     }
 
     res.json({
       success: true,
       data: {
-           m3u8: isM3U8 ? finalUrl : null,
-           referer: url ? new URL(url).origin + "/" : null,
-           intro,
-           outro,
-           subtitles
-      }
+             m3u8: isM3U8 ? finalUrl : null,
+             referer: url ? new URL(url).origin + "/" : null,
+             intro,
+             outro,
+             subtitles
+        }
     });
   } catch (e: any) {
     console.error("Stream error:", e.message);
