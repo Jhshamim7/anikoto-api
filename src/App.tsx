@@ -15,6 +15,8 @@ export default function App() {
   const [type, setType] = useState('sub');
   const [paramType, setParamType] = useState('movie');
   const [paramGenre, setParamGenre] = useState('action');
+  const [paramProducer, setParamProducer] = useState('aniplex');
+  const [paramStudio, setParamStudio] = useState('a-1-pictures');
 
   const fetchEndpoint = async (url: string) => {
     setResponse('Loading...');
@@ -67,6 +69,17 @@ export default function App() {
             <div className="flex gap-2">
               <input className="w-full p-2 border border-[#141414]" value={paramGenre} onChange={e => setParamGenre(e.target.value)} placeholder="e.g. action" />
               <button className="whitespace-nowrap bg-[#141414] text-[#E4E3E0] px-4 hover:bg-gray-800 text-sm" onClick={() => fetchEndpoint(`/api/genre/${paramGenre}`)}>Genre</button>
+            </div>
+          </div>
+          <div className="space-y-2 border-t border-[#141414] pt-4">
+            <label className="text-xs uppercase tracking-widest opacity-60">Producer & Studio</label>
+            <div className="flex gap-2">
+              <input className="w-full p-2 border border-[#141414]" value={paramProducer} onChange={e => setParamProducer(e.target.value)} placeholder="e.g. aniplex" />
+              <button className="whitespace-nowrap bg-[#141414] text-[#E4E3E0] px-4 hover:bg-gray-800 text-sm" onClick={() => fetchEndpoint(`/api/producer?id=${paramProducer}`)}>Producer</button>
+            </div>
+            <div className="flex gap-2">
+              <input className="w-full p-2 border border-[#141414]" value={paramStudio} onChange={e => setParamStudio(e.target.value)} placeholder="e.g. a-1-pictures" />
+              <button className="whitespace-nowrap bg-[#141414] text-[#E4E3E0] px-4 hover:bg-gray-800 text-sm" onClick={() => fetchEndpoint(`/api/studio?id=${paramStudio}`)}>Studio</button>
             </div>
           </div>
           <div className="space-y-2 border-t border-[#141414] pt-4">
