@@ -59,6 +59,65 @@ function extractAnimeList(html: string, selector: string = ".item, .flw-item") {
   return results;
 }
 
+// Helper to extract the maximum page number from pagination links
+function getMaxPage(html: string): number {
+  const $ = cheerio.load(html);
+  let maxPage = 1;
+  $(".pagination a.page-link").each((_, el) => {
+    const href = $(el).attr("href");
+    if (href) {
+      const match = href.match(/[?&]page=(\d+)/);
+      if (match) {
+        const pageNum = parseInt(match[1], 10);
+        if (pageNum > maxPage) {
+          maxPage = pageNum;
+        }
+      }
+    }
+  });
+  return maxPage;
+}
+
+// Helper to fetch all pages for a given path
+async function fetchAllPages(basePath: string, selector: string = ".item, .flw-item") {
+  // 1. Fetch page 1
+  const firstPageResp = await client.get(basePath);
+  const results = extractAnimeList(firstPageResp.data, selector);
+  
+  // 2. Find max page
+  const maxPage = getMaxPage(firstPageResp.data);
+  if (maxPage <= 1) {
+    return results;
+  }
+  
+  // 3. Generate page urls for page 2 to maxPage
+  const pageUrls: string[] = [];
+  for (let p = 2; p <= maxPage; p++) {
+    const separator = basePath.includes("?") ? "&" : "?";
+    pageUrls.push(`${basePath}${separator}page=${p}`);
+  }
+  
+  // 4. Fetch remaining pages with concurrency limit of 10
+  const concurrencyLimit = 10;
+  for (let i = 0; i < pageUrls.length; i += concurrencyLimit) {
+    const chunk = pageUrls.slice(i, i + concurrencyLimit);
+    const chunkPromises = chunk.map(url => 
+      client.get(url)
+        .then(res => extractAnimeList(res.data, selector))
+        .catch(err => {
+          console.error(`Error fetching page ${url}:`, err.message);
+          return [] as any[];
+        })
+    );
+    const chunkResults = await Promise.all(chunkPromises);
+    for (const pageResults of chunkResults) {
+      results.push(...pageResults);
+    }
+  }
+  
+  return results;
+}
+
 // Helper to fetch episode data-ids
 async function getEpisodesData(animeId: string) {
   const { data: watchData } = await client.get(`/watch/${animeId}`);
@@ -202,6 +261,16 @@ app.get("/api/ongoing", async (req, res) => {
   }
 });
 
+app.get("/api/upcoming", async (req, res) => {
+  try {
+    const results = await fetchAllPages("/status/not-yet-aired");
+    res.json({ success: true, data: results });
+  } catch (e: any) {
+    console.error("Upcoming error:", e.message);
+    res.status(500).json({ success: false, error: "Failed to scrape upcoming animes", details: e.message });
+  }
+});
+
 app.get("/api/type/:type", async (req, res) => {
   const { type } = req.params;
   try {
@@ -217,8 +286,7 @@ app.get("/api/type/:type", async (req, res) => {
 app.get("/api/genre/:category", async (req, res) => {
   const { category } = req.params;
   try {
-    const resp = await client.get(`/genre/${category}`);
-    const results = extractAnimeList(resp.data);
+    const results = await fetchAllPages(`/genre/${category}`);
     res.json({ success: true, data: results });
   } catch (e: any) {
     console.error("Genre error:", e.message);
@@ -281,13 +349,10 @@ app.get("/api/info", async (req, res) => {
     }
 
     const recommended: any[] = [];
-    const related: any[] = [];
-    
-    const seasons = $("#ani-seasons a").map((_, el) => ({
-      title: $(el).text().trim(),
-      id: $(el).attr("href")?.split("/watch/")[1] || ""
-    })).get().filter(x => x.title && x.id);
+    let related: any[] = [];
+    let seasons: any[] = [];
 
+    // Parse static recommendations/related if they exist
     $(".w-side-section").each((_, el) => {
       const sectionTitle = $(el).find(".title").text().trim().toLowerCase();
       const items = $(el).find(".item").map((__, iel) => ({
@@ -302,10 +367,60 @@ app.get("/api/info", async (req, res) => {
           items.forEach((item: any) => related.push(item));
       }
     });
-    
-    if (related.length === 0 && seasons.length > 0) {
-        seasons.forEach((s: any) => related.push(s));
+
+    const showId = $('input[name="show_id"]').val();
+    if (showId) {
+      try {
+        const seasonsResp = await ajaxClient.get(`/api/seasons/${showId}`, {
+          headers: { Referer: `https://anikoto.cz/watch/${animeId}` }
+        });
+        if (seasonsResp.data?.status === 200 && seasonsResp.data?.result) {
+          const $seasons = cheerio.load(seasonsResp.data.result);
+          $seasons(".season").each((_, el) => {
+            const title = $seasons(el).find(".name").text().trim();
+            const href = $seasons(el).find("a").attr("href") || "";
+            const id = href.split("/watch/")[1] || "";
+            const style = $seasons(el).find("a").attr("style") || "";
+            const imgMatch = style.match(/url\(([^)]+)\)/);
+            let image = "";
+            if (imgMatch) {
+              image = imgMatch[1].replace(/["\x27]/g, "");
+            }
+            const isActive = $seasons(el).hasClass("active");
+            seasons.push({ title, id, image, isActive });
+          });
+        }
+      } catch (err: any) {
+        console.error("Failed to fetch seasons in info api:", err.message);
+      }
+
+      try {
+        const watchOrderResp = await ajaxClient.get(`/api/watch-order/${showId}`, {
+          headers: { Referer: `https://anikoto.cz/watch/${animeId}` }
+        });
+        if (watchOrderResp.data?.status === 200 && watchOrderResp.data?.result) {
+          const $related = cheerio.load(watchOrderResp.data.result);
+          const orderRelated: any[] = [];
+          $related(".item").each((_, el) => {
+            const title = $related(el).find(".name").text().trim();
+            const href = $related(el).find("a").attr("href") || "";
+            const id = href.split("/watch/")[1] || "";
+            const image = $related(el).find("img").attr("data-src") || $related(el).find("img").attr("src") || "";
+            const relationId = $related(el).find(".relation").attr("id") || "";
+            const relationType = relationId ? relationId.split("-").map((word: string) => word.charAt(0).toUpperCase() + word.slice(1)).join(" ") : "";
+            orderRelated.push({ title, id, image, relationType });
+          });
+          if (orderRelated.length > 0) {
+            related = orderRelated;
+          }
+        }
+      } catch (err: any) {
+        console.error("Failed to fetch watch-order in info api:", err.message);
+      }
     }
+
+    const producer = info["producers"] ? info["producers"].join(", ") : (info["producer"] ? info["producer"].join(", ") : "unknown");
+    const studio = info["studios"] ? info["studios"].join(", ") : (info["studio"] ? info["studio"].join(", ") : "unknown");
 
     res.json({
       success: true,
@@ -319,7 +434,10 @@ app.get("/api/info", async (req, res) => {
           totalSub,
           totalDub,
           related,
+          seasons,
           recommendations: recommended,
+          producer,
+          studio,
           ...info
        }
     });
