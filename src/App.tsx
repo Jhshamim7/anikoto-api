@@ -58,6 +58,7 @@ export default function App() {
               <button className="w-full bg-[#141414] text-[#E4E3E0] p-2 hover:bg-gray-800 text-sm" onClick={() => fetchEndpoint(`/api/popular`)}>Popular</button>
               <button className="w-full bg-[#141414] text-[#E4E3E0] p-2 hover:bg-gray-800 text-sm" onClick={() => fetchEndpoint(`/api/completed`)}>Completed</button>
               <button className="w-full bg-[#141414] text-[#E4E3E0] p-2 hover:bg-gray-800 text-sm" onClick={() => fetchEndpoint(`/api/ongoing`)}>Ongoing</button>
+              <button className="col-span-2 w-full bg-[#141414] text-[#E4E3E0] p-2 hover:bg-gray-800 text-sm" onClick={() => fetchEndpoint(`/api/upcoming`)}>Upcoming</button>
             </div>
             <div className="flex gap-2">
               <input className="w-full p-2 border border-[#141414]" value={paramType} onChange={e => setParamType(e.target.value)} placeholder="e.g. movie" />
