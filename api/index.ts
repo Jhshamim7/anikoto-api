@@ -294,6 +294,44 @@ app.get("/api/genre/:category", async (req, res) => {
   }
 });
 
+function slugify(text: string): string {
+  return text
+    .toString()
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, "-")           // Replace spaces with -
+    .replace(/[^\w\-]+/g, "")       // Remove all non-word chars
+    .replace(/\-\-+/g, "-")         // Replace multiple - with single -
+    .replace(/^-+/, "")             // Trim - from start of text
+    .replace(/-+$/, "");            // Trim - from end of text
+}
+
+app.get("/api/producer", async (req, res) => {
+  const rawId = req.query.id as string;
+  if (!rawId) return res.status(400).json({ success: false, error: "Producer ID/Name is required" });
+  const producerSlug = slugify(rawId);
+  try {
+    const results = await fetchAllPages(`/producer/${producerSlug}`);
+    res.json({ success: true, producer: rawId, slug: producerSlug, data: results });
+  } catch (e: any) {
+    console.error("Producer error:", e.message);
+    res.status(500).json({ success: false, error: `Failed to scrape producer ${rawId}`, details: e.message });
+  }
+});
+
+app.get("/api/studio", async (req, res) => {
+  const rawId = req.query.id as string;
+  if (!rawId) return res.status(400).json({ success: false, error: "Studio ID/Name is required" });
+  const studioSlug = slugify(rawId);
+  try {
+    const results = await fetchAllPages(`/studio/${studioSlug}`);
+    res.json({ success: true, studio: rawId, slug: studioSlug, data: results });
+  } catch (e: any) {
+    console.error("Studio error:", e.message);
+    res.status(500).json({ success: false, error: `Failed to scrape studio ${rawId}`, details: e.message });
+  }
+});
+
 app.get("/api/info", async (req, res) => {
   const animeId = req.query.id as string;
   if (!animeId) return res.status(400).json({ success: false, error: "Anime ID is required" });
