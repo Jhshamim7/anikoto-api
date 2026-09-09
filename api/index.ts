@@ -2,11 +2,44 @@ import express from "express";
 import cors from "cors";
 import axios from "axios";
 import * as cheerio from "cheerio";
+import crypto from "crypto";
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
+
+const MEGAPLAY_KEYS = [
+  { key: "i?LMTAx0Q6,:}50U", iv: "W0;27ToaUpl_P%'c" }
+];
+
+function decryptMegaPlay(encToken: string): { file?: string; [key: string]: any } | null {
+  for (const { key, iv } of MEGAPLAY_KEYS) {
+    try {
+      const ceKC = new TextEncoder().encode(key);
+      const keyBytes = new Uint8Array(32);
+      keyBytes.set(ceKC.subarray(0, Math.min(32, ceKC.length)));
+
+      const ceIV = new TextEncoder().encode(iv);
+      const ivBytes = new Uint8Array(16);
+      ivBytes.set(ceIV.subarray(0, Math.min(16, ceIV.length)));
+
+      let b64 = encToken.replace(/-/g, "+").replace(/_/g, "/");
+      const pad = b64.length % 4;
+      if (pad) b64 += "====".slice(pad);
+
+      const cipherBuffer = Buffer.from(b64, "base64");
+      const decipher = crypto.createDecipheriv("aes-256-cbc", Buffer.from(keyBytes), Buffer.from(ivBytes));
+      let dec = decipher.update(cipherBuffer);
+      dec = Buffer.concat([dec, decipher.final()]);
+      const res = JSON.parse(dec.toString("utf8"));
+      if (res && res.file) return res;
+    } catch {
+      // try next key
+    }
+  }
+  return null;
+}
 
 const ajaxClient = axios.create({
   baseURL: "https://anikoto.cz",
@@ -134,16 +167,17 @@ async function getEpisodesData(animeId: string) {
   const $ep = cheerio.load(html);
   const episodes: any[] = [];
   
-  $ep("a.ep-item").each((_, el) => {
-    const epNum = parseInt($ep(el).attr("data-num") || "0", 10);
+  $ep("a[data-ids], a.ep-item").each((_, el) => {
+    const rawNum = $ep(el).attr("data-num") || $ep(el).text().trim() || "0";
+    const epNum = parseInt(rawNum.replace(/\D+/g, "") || "0", 10);
     let epTitle = $ep(el).find(".ep-name, .d-title").text().trim() || $ep(el).attr("title");
-    if(!epTitle) epTitle = `Episode ${epNum}`;
+    if (!epTitle) epTitle = `Episode ${epNum}`;
     
     episodes.push({
       num: epNum,
       title: epTitle,
       ids: $ep(el).attr("data-ids"),
-      slug: $ep(el).attr("data-slug"),
+      slug: $ep(el).attr("data-slug") || String(epNum),
       malId: parseInt($ep(el).attr("data-mal") || "0", 10) || null,
       isSub: $ep(el).attr("data-sub") === "1",
       isDub: $ep(el).attr("data-dub") === "1",
@@ -153,12 +187,14 @@ async function getEpisodesData(animeId: string) {
   
   // Fallback if the site structure changes
   if (episodes.length === 0) {
-    $ep("a[data-ids][data-num]").each((_, el) => {
+    $ep("a[data-ids]").each((_, el) => {
+      const rawNum = $ep(el).attr("data-num") || $ep(el).text().trim() || "0";
+      const epNum = parseInt(rawNum.replace(/\D+/g, "") || "0", 10);
       episodes.push({
-        num: parseInt($ep(el).attr("data-num") || "0", 10),
-        title: $ep(el).find(".ep-name, .d-title").text().trim() || $ep(el).parent().attr("title") || `Episode ${$ep(el).attr("data-num")}`,
+        num: epNum,
+        title: $ep(el).find(".ep-name, .d-title").text().trim() || $ep(el).parent().attr("title") || `Episode ${epNum}`,
         ids: $ep(el).attr("data-ids"),
-        slug: $ep(el).attr("data-slug"),
+        slug: $ep(el).attr("data-slug") || String(epNum),
         malId: parseInt($ep(el).attr("data-mal") || "0", 10) || null,
         isSub: $ep(el).attr("data-sub") === "1",
         isDub: $ep(el).attr("data-dub") === "1",
@@ -173,34 +209,7 @@ async function getEpisodesData(animeId: string) {
 // Helper function to map server names to standardized names
 function mapServerName(name: string): string {
   const lowerName = name.toLowerCase().trim();
-  
-  // VidCloud-1 or similar VidCloud servers map to hd-1
-  if (lowerName.includes("vidcloud")) {
-    return "hd-1";
-  }
-  
-  // Vidstream, Vidstream-2 or similar map to hd-2
-  if (lowerName.includes("vidstream")) {
-    return "hd-2";
-  }
-  
-  // HD-1 or any HD- server maps to hd-3
-  if (lowerName.includes("hd-") || lowerName.includes("hd ")) {
-    return "hd-3";
-  }
-  
-  // MegaCloud, RabbitStream etc map to hd-1 (same group as VidCloud)
-  if (lowerName.includes("megacloud") || lowerName.includes("rabbitstream")) {
-    return "hd-1";
-  }
-  
-  // MegaPlay maps to hd-2
-  if (lowerName.includes("megaplay")) {
-    return "hd-2";
-  }
-  
-  // Default fallback for unknown servers
-  return "hd-3";
+  return lowerName.replace(/\s+/g, "-");
 }
 
 // API routes
@@ -508,13 +517,23 @@ app.get("/api/servers", async (req, res) => {
   const { id: animeId, ep: epSlug } = req.query as { id: string, ep: string };
   try {
     const { episodes } = await getEpisodesData(animeId);
-    const episode = episodes.find(e => e.slug === epSlug);
+    const cleanEp = epSlug ? epSlug.replace(/^ep-/, "") : "";
+    const episode = episodes.find(
+      (e) =>
+        e.slug === epSlug ||
+        e.slug === cleanEp ||
+        String(e.num) === epSlug ||
+        String(e.num) === cleanEp
+    );
     
     if (!episode) return res.status(404).json({ error: "Episode not found" });
 
-    const [animeNumId, epsNum] = episode.ids.split("&eps=");
+    const serverParams = episode.ids.includes("&eps=")
+      ? { servers: episode.ids.split("&eps=")[0], eps: episode.ids.split("&eps=")[1] }
+      : { servers: episode.ids };
+
     const resp = await ajaxClient.get(`/ajax/server/list`, {
-      params: { servers: animeNumId, eps: epsNum },
+      params: serverParams,
       headers: { Referer: `https://anikoto.cz/watch/${animeId}` }
     });
     
@@ -522,16 +541,16 @@ app.get("/api/servers", async (req, res) => {
     const $ = cheerio.load(html);
     const servers: any[] = [];
     
-    $(".type li[data-link-id]").each((_, el) => {
+    $(".type li[data-link-id], li[data-link-id]").each((_, el) => {
       const name = $(el).text().trim();
       const mappedName = mapServerName(name);
 
       servers.push({
-        type: $(el).closest(".type").attr("data-type"),
+        type: $(el).closest(".type").attr("data-type") || "sub",
         serverName: mappedName,
         originalName: name,
         linkId: $(el).attr("data-link-id"),
-        serverId: $(el).attr("data-sv-id")
+        serverId: $(el).attr("data-sv-id") || $(el).attr("data-id")
       });
     });
     
@@ -543,39 +562,62 @@ app.get("/api/servers", async (req, res) => {
 });
 
 app.get("/api/stream", async (req, res) => {
-  const { id: animeId, ep: epSlug, server: serverName, type = 'sub' } = req.query as { id: string, ep: string, server: string, type: string };
+  const { id: animeId, ep: epSlug, server: serverName, linkId: queryLinkId, type = 'sub' } = req.query as { id: string, ep: string, server?: string, linkId?: string, type?: string };
   try {
     const { episodes } = await getEpisodesData(animeId);
-    const episode = episodes.find(e => e.slug === epSlug);
+    const cleanEp = epSlug ? epSlug.replace(/^ep-/, "") : "";
+    const episode = episodes.find(
+      (e) =>
+        e.slug === epSlug ||
+        e.slug === cleanEp ||
+        String(e.num) === epSlug ||
+        String(e.num) === cleanEp
+    );
     if (!episode) return res.status(404).json({ error: "Episode not found" });
 
-    const [animeNumId, epsNum] = episode.ids.split("&eps=");
+    const serverParams = episode.ids.includes("&eps=")
+      ? { servers: episode.ids.split("&eps=")[0], eps: episode.ids.split("&eps=")[1] }
+      : { servers: episode.ids };
+
     const serverResp = await ajaxClient.get(`/ajax/server/list`, {
-      params: { servers: animeNumId, eps: epsNum },
+      params: serverParams,
       headers: { Referer: `https://anikoto.cz/watch/${animeId}` }
     });
     
     const html = serverResp.data.result || "";
     const $ = cheerio.load(html);
     
-    let targetLinkId: string | undefined;
+    let targetLinkId: string | undefined = queryLinkId;
+    const requested = serverName ? serverName.toLowerCase().trim() : "";
     
-    $(".type li[data-link-id]").each((_, el) => {
-      const t = $(el).closest(".type").attr("data-type");
-      const name = $(el).text().trim();
-      const mappedName = mapServerName(name);
+    if (!targetLinkId && requested) {
+      $(".type li[data-link-id], li[data-link-id]").each((_, el) => {
+        const t = $(el).closest(".type").attr("data-type") || "sub";
+        const link = $(el).attr("data-link-id");
+        const svId = ($(el).attr("data-sv-id") || $(el).attr("data-id") || "").toLowerCase().trim();
+        const origName = $(el).text().trim();
+        const mapped = mapServerName(origName);
 
-      if (t === type && mappedName === serverName) {
-        targetLinkId = $(el).attr("data-link-id");
-      }
-    });
-    
-    if (!targetLinkId) {
-       targetLinkId = $(`.type[data-type='${type}'] li[data-link-id]`).first().attr("data-link-id");
+        if (t === type && link) {
+          if (
+            link === serverName ||
+            svId === requested ||
+            mapped === requested ||
+            origName.toLowerCase() === requested
+          ) {
+            targetLinkId = link;
+            return false;
+          }
+        }
+      });
     }
     
     if (!targetLinkId) {
-       targetLinkId = $("li[data-link-id]").first().attr("data-link-id");
+      targetLinkId = $(`.type[data-type='${type}'] li[data-link-id]`).first().attr("data-link-id");
+    }
+    
+    if (!targetLinkId) {
+      targetLinkId = $("li[data-link-id]").first().attr("data-link-id");
     }
     
     if (!targetLinkId) return res.status(404).json({ error: "No servers found for episode" });
@@ -591,6 +633,7 @@ app.get("/api/stream", async (req, res) => {
     let intro = { start: 0, end: 0 };
     let outro = { start: 0, end: 0 };
     let subtitles: any[] = [];
+    let streamReferer = url ? new URL(url).origin + "/" : "https://megaplay.buzz/";
     
     if (sourceResp.data.result?.intro) intro = sourceResp.data.result.intro;
     if (sourceResp.data.result?.outro) outro = sourceResp.data.result.outro;
@@ -598,43 +641,86 @@ app.get("/api/stream", async (req, res) => {
     
     if (url && (url.includes('megaplay') || url.includes('vidwish') || url.includes('megacloud') || url.includes('rabbitstream') || url.includes('vidstream'))) {
        try {
-             const host = new URL(url).origin;
+             const embedParsed = new URL(url);
+             const host = embedParsed.origin;
+             streamReferer = `${host}/`;
+             const sParam = embedParsed.searchParams.get('s') || '';
+
              const r = await axios.get(url, {
                 headers: {
-                  "Accept": "*/*",
-                  "X-Requested-With": "XMLHttpRequest",
+                  "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                   "Referer": "https://anikoto.cz/"
                 },
                 timeout: 10000
              });
              const $r = cheerio.load(r.data);
-             const id = $r("#megaplay-player").attr("data-id") || $r("#megacloud-player").attr("data-id") || $r("#rabbitstream-player").attr("data-id") || $r("[data-id]").first().attr("data-id");
+             const id = $r("#megaplay-player").attr("data-id") ||
+                        $r("#megaplay-player").attr("data-realid") ||
+                        $r("#megacloud-player").attr("data-id") ||
+                        $r("#rabbitstream-player").attr("data-id") ||
+                        $r("#vidcloud-player").attr("data-id") ||
+                        $r("#vidstream-player").attr("data-id") ||
+                        $r("[data-id]").first().attr("data-id") ||
+                        (r.data.match(/data-id="([^"]+)"/) ? r.data.match(/data-id="([^"]+)"/)[1] : null);
              
              if (id) {
-                 const sourceUrl = `${host}/stream/getSources?id=${encodeURIComponent(id)}`;
-                 const sr = await axios.get(sourceUrl, {
-                     headers: {
-                         "Accept": "*/*",
-                         "X-Requested-With": "XMLHttpRequest",
-                         "Referer": `${host}/`
-                     },
-                     timeout: 10000
-                 });
-                 if (sr.data && sr.data.sources && sr.data.sources.file) {
-                     finalUrl = sr.data.sources.file;
-                     isM3U8 = true;
+                 const querySuffix = sParam ? `&s=${encodeURIComponent(sParam)}` : '';
+                 const sourceEndpoints = [
+                     `${host}/stream/getSources?id=${encodeURIComponent(id)}${querySuffix}`,
+                     `${host}/stream/getSourcesNew?id=${encodeURIComponent(id)}${querySuffix}`,
+                     `${host}/stream/getSources?id=${encodeURIComponent(id)}`,
+                     `${host}/embed-2/ajax/e-1/getSources?id=${encodeURIComponent(id)}`
+                 ];
+
+                 let sr: any = null;
+                 for (const sUrl of sourceEndpoints) {
+                     try {
+                         sr = await axios.get(sUrl, {
+                             headers: {
+                                 "Accept": "application/json, text/javascript, */*; q=0.01",
+                                 "X-Requested-With": "XMLHttpRequest",
+                                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                                 "Referer": url
+                             },
+                             timeout: 8000
+                         });
+                         if (sr?.data && (sr.data.enc || sr.data.sources)) break;
+                     } catch {
+                         // try next
+                     }
+                 }
+
+                 if (sr?.data) {
                      if (sr.data.intro) intro = sr.data.intro;
                      if (sr.data.outro) outro = sr.data.outro;
-                     if (sr.data.tracks) subtitles = sr.data.tracks;
-                 } else {
-                     isM3U8 = false;
+                     if (sr.data.tracks) {
+                       const captions = sr.data.tracks.filter((t: any) => t.kind === "captions");
+                       subtitles = captions.length > 0 ? captions : sr.data.tracks;
+                     }
+
+                     if (sr.data.enc) {
+                         const decrypted = decryptMegaPlay(sr.data.enc);
+                         if (decrypted && decrypted.file) {
+                             finalUrl = decrypted.file;
+                             isM3U8 = true;
+                         }
+                     } else if (sr.data.sources) {
+                         const file = sr.data.sources.file || (Array.isArray(sr.data.sources) && sr.data.sources[0]?.file);
+                         if (file) {
+                             finalUrl = file;
+                             isM3U8 = true;
+                         }
+                     }
+
+                     // Fix blocked cdn.imgnex.top domain to active working ncdn.imgnex.top mirror
+                     if (finalUrl && finalUrl.includes("cdn.imgnex.top")) {
+                         finalUrl = finalUrl.replace("https://cdn.imgnex.top", "https://ncdn.imgnex.top");
+                     }
                  }
-             } else {
-                 isM3U8 = false;
              }
          } catch(e: any) {
              console.log("MegaPlay extraction failed, falling back to Iframe URL:", e.message);
-             isM3U8 = false;
          }
     }
 
@@ -642,7 +728,7 @@ app.get("/api/stream", async (req, res) => {
       success: true,
       data: {
              m3u8: isM3U8 ? finalUrl : null,
-             referer: url ? new URL(url).origin + "/" : null,
+             referer: streamReferer,
              intro,
              outro,
              subtitles
